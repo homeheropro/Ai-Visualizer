@@ -31,14 +31,26 @@ Serves the face gallery at http://127.0.0.1:8790/ and exposes:
            faces, discovered by scanning the faces/ folder. Drop a new
            folder with an index.html into faces/ and it appears in the
            gallery. That is the whole plugin system.
+  /sessions every Claude Code session this machine has a record of,
+           newest first, live ones flagged — reads sessions.py, which
+           reads Claude Code's own on-disk logs. Not part of the voice
+           bus; works whether or not a voice line is running.
+  /projects the same data rolled up by project folder.
+  /plans   Plan Mode's own output at ~/.claude/plans, newest first. A
+           viewer, not an approval tracker — see list_plans()'s
+           docstring for what it can't tell you.
 
-READ-ONLY on the signal bus. The bus is three tiny files written by a
-voice line (backtalk writes them natively, github.com/jaredrhod/backtalk):
+READ-ONLY on the signal bus. The bus is tiny files written by a voice
+line (backtalk writes them natively, github.com/jaredrhod/backtalk):
 
-  .voice_state        idle | listening | thinking | speaking
-  .voice_waveform     JSON {ts, samples: [64 floats]} while audio plays
-  .voice_loading_pid  exists while the voice line plays a thinking sound
-  .voice_alert        optional: non-empty file = attention needed
+  .voice_state         idle | listening | thinking | speaking
+  .voice_waveform      JSON {ts, samples: [64 floats]} while audio plays
+  .voice_loading_pid   exists while the voice line plays a thinking sound
+  .voice_alert         optional: non-empty file = attention needed
+  .voice_activity      JSON {ts, text} — what tool is running right now
+  .voice_rate_limits   JSON usage by window — only if show_usage is on
+  .voice_session_usage JSON {turns, in_tokens, out_tokens, cost} — only
+                       if show_usage is on
 
 Where the bus lives comes from "bus_dir" in ai-visualizer.json (default:
 this folder). Point it at your backtalk folder, or point backtalk's
@@ -64,6 +76,8 @@ import urllib.request
 import errno
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+import sessions as claude_sessions
 
 HERE = Path(__file__).resolve().parent
 STATES = {"idle", "listening", "thinking", "speaking"}
@@ -125,6 +139,38 @@ def list_faces():
     return faces
 
 
+PLANS_DIR = Path.home() / ".claude" / "plans"
+
+
+def list_plans():
+    """Plan Mode's own output, listed newest first — a viewer onto an
+    existing workflow, not a new approval gate. Claude Code writes no
+    record of whether a plan was approved, rejected, or abandoned
+    anywhere this could find; this reports what was planned, not a
+    verified approval trail. See the build plan's Phase 4 for the same
+    caveat stated plainly rather than glossed over."""
+    out = []
+    if not PLANS_DIR.is_dir():
+        return out
+    for p in PLANS_DIR.glob("*.md"):
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            continue
+        title = p.stem
+        try:
+            for line in p.read_text(encoding="utf-8",
+                                    errors="ignore").splitlines():
+                if line.startswith("# "):
+                    title = line[2:].strip()
+                    break
+        except OSError:
+            pass
+        out.append({"file": p.name, "title": title, "mtime": mtime})
+    out.sort(key=lambda r: r["mtime"], reverse=True)
+    return out
+
+
 def mock_bus():
     t = time.time()
     level = 0.0
@@ -144,7 +190,11 @@ def mock_bus():
             "rate_limits": {
                 "five_hour": {"utilization": 0.34, "resets_at": t + 9200},
                 "seven_day": {"utilization": 0.61, "resets_at": t + 288000},
-            }}
+            },
+            "session_usage": {"turns": 7, "in_tokens": 41000,
+                              "out_tokens": 6200, "cost": 0.38},
+            "activity": "editing dashboard/index.html" if MOCK == "thinking"
+                        else ""}
 
 
 def read_bus():
@@ -175,6 +225,12 @@ def read_bus():
     except OSError:
         alert = False
     loading = (BUS / ".voice_loading_pid").exists()
+    activity = ""
+    try:
+        payload = json.loads((BUS / ".voice_activity").read_text())
+        activity = payload.get("text") or ""
+    except (OSError, ValueError):
+        pass
     # Absent unless the voice line was told to publish it, which is the
     # normal case: it is the account holder's own spend and it stays off
     # until asked for. An empty dict simply means no readout.
@@ -183,8 +239,17 @@ def read_bus():
         rate_limits = json.loads((BUS / ".voice_rate_limits").read_text())
     except (OSError, ValueError):
         pass
+    # Same absent-unless-published posture as rate_limits: no file means
+    # show_usage is off, or no turn has completed yet this session.
+    session_usage = {}
+    try:
+        session_usage = json.loads(
+            (BUS / ".voice_session_usage").read_text())
+    except (OSError, ValueError):
+        pass
     return {"state": state, "level": level, "samples": samples,
-            "alert": alert, "loading": loading, "rate_limits": rate_limits}
+            "alert": alert, "loading": loading, "rate_limits": rate_limits,
+            "session_usage": session_usage, "activity": activity}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -200,6 +265,17 @@ class Handler(BaseHTTPRequestHandler):
                        "thinking_sound": bool(CFG["thinking_sound"]),
                        "faces": list_faces()}
                 self._send(json.dumps(out).encode(), "application/json")
+            elif path == "/sessions":
+                self._send(
+                    json.dumps(claude_sessions.list_sessions()).encode(),
+                    "application/json")
+            elif path == "/projects":
+                self._send(
+                    json.dumps(claude_sessions.list_projects()).encode(),
+                    "application/json")
+            elif path == "/plans":
+                self._send(json.dumps(list_plans()).encode(),
+                           "application/json")
             else:
                 self._static(path)
         except ConnectionError:

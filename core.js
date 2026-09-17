@@ -34,6 +34,11 @@
      AV.name       display name from config ("JARVIS" by default)
      AV.label      the dotted chip label ("J.A.R.V.I.S.")
      AV.badge      optional handle from config ("" by default)
+     AV.rateLimits {} unless show_usage is on — plan usage by window
+     AV.sessionUsage {} until a turn completes with show_usage on —
+                   {turns, in_tokens, out_tokens, cost} for THIS session
+     AV.activity   "" when idle, else a short line naming the tool the
+                   agent is using right now ("editing brain.py", ...)
 
    Modes:
      live   served by server.py — rides the real signal bus
@@ -68,6 +73,7 @@ const AV = (() => {
     samples: new Float32Array(64),
     name: "JARVIS", label: "J.A.R.V.I.S.", badge: "",
     demo: DEMO, shot: SHOT, faces: [],
+    rateLimits: {}, sessionUsage: {}, activity: "",
     _sndOn: true, _mic: false, _readyCbs: [], _ready: false,
   };
 
@@ -151,6 +157,8 @@ const AV = (() => {
     // Empty unless the voice line was told to publish usage. A face that
     // wants to draw it reads AV.rateLimits; every other face ignores it.
     A.rateLimits = raw.rate_limits || {};
+    A.sessionUsage = raw.session_usage || {};
+    A.activity = raw.activity || "";
     A.level = raw.level || 0;
 
     // adaptive envelope: normalize against a decaying peak, then ease
@@ -347,6 +355,25 @@ const AV = (() => {
       });
     }
     return out;
+  };
+  // This session's own turns/tokens/cost — the numbers "usage report"
+  // already speaks aloud, formatted once for a dashboard tile. Returns
+  // null until a turn has completed with show_usage on, same
+  // absent-means-nothing-to-draw posture as usageRows().
+  U.sessionUsageRow = () => {
+    const s = A.sessionUsage || {};
+    if (!s.turns) return null;
+    const fmtTok = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M"
+      : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
+    const cents = Math.round((s.cost || 0) * 100);
+    const costText = cents < 1 ? "—"
+      : cents < 100 ? cents + "¢" : "$" + (cents / 100).toFixed(2);
+    return {
+      turns: s.turns,
+      text: s.turns + " turn" + (s.turns === 1 ? "" : "s") + "  ·  "
+        + fmtTok(s.in_tokens || 0) + " in / " + fmtTok(s.out_tokens || 0)
+        + " out  ·  " + costText
+    };
   };
   U.mix = (c1, c2, t) => [c1[0] + (c2[0] - c1[0]) * t | 0,
                           c1[1] + (c2[1] - c1[1]) * t | 0,

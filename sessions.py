@@ -138,35 +138,56 @@ def list_sessions() -> list[dict]:
     running. Best-effort throughout: an unreadable file is skipped, not
     a crash."""
     live = live_sessions()
+    matched = set()
     out = []
-    if not PROJECTS_DIR.is_dir():
-        return out
-    for proj_dir in PROJECTS_DIR.iterdir():
-        if not proj_dir.is_dir():
+    if PROJECTS_DIR.is_dir():
+        for proj_dir in PROJECTS_DIR.iterdir():
+            if not proj_dir.is_dir():
+                continue
+            for sess_file in proj_dir.glob("*.jsonl"):
+                sid = sess_file.stem
+                cwd = _find_cwd(sess_file)
+                last_role, last_ts = _tail_activity(sess_file)
+                try:
+                    mtime = sess_file.stat().st_mtime
+                except OSError:
+                    mtime = 0
+                live_rec = live.get(sid)
+                if live_rec:
+                    matched.add(sid)
+                out.append(_row(sid, proj_dir.name, cwd, last_role, last_ts,
+                                 mtime, live_rec))
+    # A session can go live before its transcript file exists (or between
+    # a project folder listing and this loop finishing) -- without this,
+    # a session that is genuinely running right now would be silently
+    # absent rather than merely lacking history, which is the one failure
+    # this module exists to avoid.
+    for sid, live_rec in live.items():
+        if sid in matched:
             continue
-        for sess_file in proj_dir.glob("*.jsonl"):
-            sid = sess_file.stem
-            cwd = _find_cwd(sess_file)
-            last_role, last_ts = _tail_activity(sess_file)
-            try:
-                mtime = sess_file.stat().st_mtime
-            except OSError:
-                mtime = 0
-            live_rec = live.get(sid)
-            row = {
-                "session_id": sid,
-                "project_folder": proj_dir.name,
-                "cwd": cwd or (live_rec or {}).get("cwd") or "",
-                "last_role": last_role,
-                "last_ts": last_ts,
-                "mtime": mtime,
-                "live": live_rec is not None,
-                "status": live_rec.get("status") if live_rec else None,
-                "name": live_rec.get("name") if live_rec else None,
-            }
-            out.append(row)
+        ts = (live_rec.get("statusUpdatedAt") or live_rec.get("startedAt")
+              or 0) / 1000
+        out.append(_row(sid, "(no transcript yet)", live_rec.get("cwd", ""),
+                         "", "", ts, live_rec))
     out.sort(key=lambda r: r["mtime"], reverse=True)
     return out
+
+
+def _row(sid, project_folder, cwd, last_role, last_ts, mtime, live_rec):
+    return {
+        "session_id": sid,
+        "project_folder": project_folder,
+        "cwd": cwd or (live_rec or {}).get("cwd") or "",
+        "last_role": last_role,
+        "last_ts": last_ts,
+        "mtime": mtime,
+        "live": live_rec is not None,
+        "status": live_rec.get("status") if live_rec else None,
+        "name": live_rec.get("name") if live_rec else None,
+        "kind": live_rec.get("kind") if live_rec else None,
+        "entrypoint": live_rec.get("entrypoint") if live_rec else None,
+        "started_at": live_rec.get("startedAt") if live_rec else None,
+    }
 
 
 def list_projects() -> list[dict]:

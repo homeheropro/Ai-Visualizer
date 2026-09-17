@@ -34,28 +34,30 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   body{padding:22px 26px 60px}
 
   header{display:flex;align-items:baseline;justify-content:space-between;
-    border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:20px}
+    border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:16px}
   header .t{font-size:20px;letter-spacing:.18em}
   header .state{font-size:12px;letter-spacing:.22em;color:var(--dim)}
   header .state.speaking,header .state.listening{color:var(--green)}
   header .state.thinking{color:var(--gold)}
 
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-  @media (max-width:900px){.grid{grid-template-columns:1fr}}
+  /* Top-level tab bar -- one task open at a time */
+  .tabbar{display:flex;gap:6px;margin-bottom:18px;flex-wrap:wrap}
+  .tabbar button{background:none;border:1px solid var(--dimmer);
+    color:var(--dim);font-family:var(--mono);font-size:12px;letter-spacing:.12em;
+    text-transform:uppercase;padding:7px 16px;border-radius:4px;cursor:pointer}
+  .tabbar button.on{color:var(--ink);border-color:var(--gold);background:var(--panel)}
+  .tabbar button .dot{display:inline-block;width:6px;height:6px;border-radius:50%;
+    background:var(--green);margin-right:7px;vertical-align:middle}
 
-  .tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;
-    padding:16px 18px;display:flex;flex-direction:column;min-height:0}
-  .tile h2{font-size:12px;letter-spacing:.24em;color:var(--dim);
-    text-transform:uppercase;margin-bottom:10px;display:flex;
-    justify-content:space-between;align-items:center}
-  .tile h2 .tabs button{background:none;border:1px solid var(--dimmer);
-    color:var(--dim);font-family:var(--mono);font-size:11px;letter-spacing:.1em;
-    padding:2px 8px;border-radius:3px;cursor:pointer;margin-left:6px}
-  .tile h2 .tabs button.on{color:var(--ink);border-color:var(--gold)}
-  .note{font-size:11px;color:var(--dimmer);margin-top:8px;line-height:1.5}
+  .panel{display:none;background:var(--panel);border:1px solid var(--line);
+    border-radius:6px;padding:18px 22px;max-width:900px}
+  .panel.on{display:block}
+  .panel h2{font-size:12px;letter-spacing:.24em;color:var(--dim);
+    text-transform:uppercase;margin-bottom:12px}
+  .note{font-size:11px;color:var(--dimmer);margin-top:10px;line-height:1.5}
 
   /* Runs */
-  #runs-log{list-style:none;max-height:280px;overflow-y:auto;font-size:13px}
+  #runs-log{list-style:none;max-height:400px;overflow-y:auto;font-size:13px}
   #runs-log li{padding:5px 0;border-bottom:1px solid var(--line);
     display:flex;gap:10px}
   #runs-log li .ts{color:var(--dimmer);flex:0 0 auto;font-size:11px;
@@ -76,7 +78,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     border:1px solid rgba(61,220,132,.4)}
   .badge.done{background:rgba(138,154,162,.1);color:var(--dim);
     border:1px solid var(--dimmer)}
-  .scroll{max-height:280px;overflow-y:auto}
+  .scroll{max-height:420px;overflow-y:auto}
+
+  /* Active conversation */
+  .active-card{border:1px solid var(--line);border-radius:6px;
+    padding:12px 14px;margin-bottom:10px}
+  .active-card .name{font-size:15px;color:var(--gold);letter-spacing:.03em;
+    margin-bottom:6px}
+  .active-card .row{display:flex;justify-content:space-between;
+    font-size:12px;color:var(--dim);padding:3px 0}
+  .active-card .row .v{color:var(--ink)}
+  #active-empty{color:var(--dimmer)}
 
   /* Specs */
   #plans-list{list-style:none}
@@ -86,7 +98,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   #plans-list .when{color:var(--dimmer);font-size:11px;margin-left:8px}
   #plan-view{display:none;margin-top:10px;padding-top:10px;
     border-top:1px solid var(--line);white-space:pre-wrap;font-size:12px;
-    max-height:320px;overflow-y:auto;color:var(--dim)}
+    max-height:420px;overflow-y:auto;color:var(--dim)}
   #plan-view.open{display:block}
   #plan-view .close{float:right;cursor:pointer;color:var(--gold)}
 
@@ -105,60 +117,79 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   <div class="state" id="state">idle</div>
 </header>
 
-<div class="grid">
+<nav class="tabbar" id="tabbar">
+  <button class="tabbtn on" data-tab="active">Active<span id="active-count"></span></button>
+  <button class="tabbtn" data-tab="runs">Runs</button>
+  <button class="tabbtn" data-tab="usage">Usage</button>
+  <button class="tabbtn" data-tab="sessions">Sessions</button>
+  <button class="tabbtn" data-tab="projects">Projects</button>
+  <button class="tabbtn" data-tab="specs">Specs</button>
+</nav>
 
-  <div class="tile">
-    <h2>Runs</h2>
-    <div id="runs-now" class="idle">idle</div>
-    <ul id="runs-log"><li class="empty">nothing run yet this page load</li></ul>
-    <div class="note">What the agent is doing right now, and a short
-      history since this page opened. Nothing before that is kept —
-      this reads the live signal bus, not a log file.</div>
+<div class="panel on" data-panel="active">
+  <h2>Active Conversation</h2>
+  <div id="active-list"><div id="active-empty">no Claude Code process is
+    running right now</div></div>
+  <div class="note">Every session file under ~/.claude/sessions is a
+    process running on this machine at this instant -- a terminal window
+    and a voice session both count if both are open. This does not mean
+    it is waiting on you; only that it exists and is running. "Kind" and
+    "entrypoint" are read straight off that file, not interpreted.</div>
+</div>
+
+<div class="panel" data-panel="runs">
+  <h2>Runs</h2>
+  <div id="runs-now" class="idle">idle</div>
+  <ul id="runs-log"><li class="empty">nothing run yet this page load</li></ul>
+  <div class="note">What the agent is doing right now, and a short
+    history since this page opened. Nothing before that is kept —
+    this reads the live signal bus, not a log file.</div>
+</div>
+
+<div class="panel" data-panel="usage">
+  <h2>Usage</h2>
+  <div id="rate-limits"><div class="note">Waiting on data — only
+    appears once show_usage is on and a turn has completed.</div></div>
+  <div id="session-usage"></div>
+  <div class="note">The five-hour/weekly figures are the account's
+    real plan usage, pulled through the Agent SDK. This-session turns/
+    tokens/cost are the same numbers "usage report" speaks aloud.</div>
+</div>
+
+<div class="panel" data-panel="sessions">
+  <h2>Sessions</h2>
+  <div class="scroll">
+    <table id="sessions-table"><thead><tr>
+      <th>Live</th><th>Project</th><th>Status / last</th><th>Updated</th>
+    </tr></thead><tbody></tbody></table>
   </div>
+  <div class="note">"Live" means a Claude Code process is actually
+    running that session right now. It does NOT reliably mean it is
+    waiting on you specifically — only "busy" has been confirmed as
+    an observed status value so far; other states aren't verified yet.</div>
+</div>
 
-  <div class="tile">
-    <h2>Usage</h2>
-    <div id="rate-limits"><div class="note">Waiting on data — only
-      appears once show_usage is on and a turn has completed.</div></div>
-    <div id="session-usage"></div>
-    <div class="note">The five-hour/weekly figures are the account's
-      real plan usage, pulled through the Agent SDK. This-session turns/
-      tokens/cost are the same numbers "usage report" speaks aloud.</div>
+<div class="panel" data-panel="projects">
+  <h2>Projects</h2>
+  <div class="scroll">
+    <table id="projects-table"><thead><tr>
+      <th>Project</th><th>Sessions</th><th>Live</th><th>Updated</th>
+    </tr></thead><tbody></tbody></table>
   </div>
+  <div class="note">The same session rows as Sessions, rolled up by
+    project folder.</div>
+</div>
 
-  <div class="tile">
-    <h2>Sessions &amp; Projects
-      <span class="tabs">
-        <button id="tab-sessions" class="on">Sessions</button
-        ><button id="tab-projects">Projects</button>
-      </span>
-    </h2>
-    <div class="scroll">
-      <table id="sessions-table"><thead><tr>
-        <th>Live</th><th>Project</th><th>Status / last</th><th>Updated</th>
-      </tr></thead><tbody></tbody></table>
-      <table id="projects-table" style="display:none"><thead><tr>
-        <th>Project</th><th>Sessions</th><th>Live</th><th>Updated</th>
-      </tr></thead><tbody></tbody></table>
-    </div>
-    <div class="note">"Live" means a Claude Code process is actually
-      running that session right now. It does NOT reliably mean it is
-      waiting on you specifically — only "busy" has been confirmed as
-      an observed status value so far; other states aren't verified yet.</div>
-  </div>
-
-  <div class="tile">
-    <h2>Specs</h2>
-    <ul id="plans-list"><li class="empty" style="color:var(--dimmer)">
-      no plans on disk yet</li></ul>
-    <div id="plan-view"><span class="close" id="plan-close">close</span>
-      <div id="plan-text"></div></div>
-    <div class="note">Plan Mode's own output, not a separate approval
-      system. This shows what was planned, not whether it was approved,
-      rejected, or abandoned — that isn't recorded anywhere this can
-      read.</div>
-  </div>
-
+<div class="panel" data-panel="specs">
+  <h2>Specs</h2>
+  <ul id="plans-list"><li class="empty" style="color:var(--dimmer)">
+    no plans on disk yet</li></ul>
+  <div id="plan-view"><span class="close" id="plan-close">close</span>
+    <div id="plan-text"></div></div>
+  <div class="note">Plan Mode's own output, not a separate approval
+    system. This shows what was planned, not whether it was approved,
+    rejected, or abandoned — that isn't recorded anywhere this can
+    read.</div>
 </div>
 
 <script src="../../core.js"></script>
@@ -169,6 +200,16 @@ AV.init({});
 AV.ready(a => { document.title = a.label + " — Dashboard"; });
 
 const $ = id => document.getElementById(id);
+
+/* ---------------- Tabs: one panel open at a time ---------------- */
+document.querySelectorAll(".tabbtn").forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll(".tabbtn").forEach(b => b.classList.remove("on"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("on"));
+    btn.classList.add("on");
+    document.querySelector(`.panel[data-panel="${btn.dataset.tab}"]`).classList.add("on");
+  };
+});
 
 /* ---------------- Runs: live activity + a page-local history ---------------- */
 let lastActivity = null;
@@ -233,7 +274,7 @@ function renderState() {
   el.className = "state " + AV.state;
 }
 
-/* ---------------- Sessions & Projects ---------------- */
+/* ---------------- Sessions / Projects / Active ---------------- */
 let sessionsData = [], projectsData = [];
 
 function agoText(epochSeconds) {
@@ -243,6 +284,15 @@ function agoText(epochSeconds) {
   if (d < 3600) return Math.round(d / 60) + "m ago";
   if (d < 86400) return Math.round(d / 3600) + "h ago";
   return Math.round(d / 86400) + "d ago";
+}
+
+function durationText(startMs) {
+  if (!startMs) return "—";
+  const d = (Date.now() - startMs) / 1000;
+  if (!(d >= 0)) return "—";
+  if (d < 60) return "just started";
+  if (d < 3600) return Math.round(d / 60) + "m";
+  return Math.floor(d / 3600) + "h " + Math.round((d % 3600) / 60) + "m";
 }
 
 function shortCwd(cwd) {
@@ -271,18 +321,26 @@ function renderProjects() {
   </tr>`).join("") || "<tr><td colspan=4>no projects found</td></tr>";
 }
 
-$("tab-sessions").onclick = () => {
-  $("tab-sessions").classList.add("on");
-  $("tab-projects").classList.remove("on");
-  $("sessions-table").style.display = "";
-  $("projects-table").style.display = "none";
-};
-$("tab-projects").onclick = () => {
-  $("tab-projects").classList.add("on");
-  $("tab-sessions").classList.remove("on");
-  $("projects-table").style.display = "";
-  $("sessions-table").style.display = "none";
-};
+function renderActive() {
+  const live = sessionsData.filter(s => s.live);
+  $("active-count").textContent = live.length ? ` (${live.length})` : "";
+  const list = $("active-list");
+  if (!live.length) {
+    list.innerHTML = '<div id="active-empty">no Claude Code process is ' +
+      'running right now</div>';
+    return;
+  }
+  list.innerHTML = live.map(s => `
+    <div class="active-card">
+      <div class="name">${s.name || s.session_id.slice(0, 8)}</div>
+      <div class="row"><span>status</span><span class="v">${s.status || "?"}</span></div>
+      <div class="row"><span>kind</span><span class="v">${s.kind || "—"}${s.entrypoint ? " · " + s.entrypoint : ""}</span></div>
+      <div class="row"><span>working directory</span><span class="v" title="${(s.cwd || "").replace(/"/g, "&quot;")}">${s.cwd || "—"}</span></div>
+      <div class="row"><span>running for</span><span class="v">${durationText(s.started_at)}</span></div>
+      <div class="row"><span>last update</span><span class="v">${agoText(s.mtime)}</span></div>
+    </div>
+  `).join("");
+}
 
 /* ---------------- Specs (plans) ---------------- */
 let plansData = [];
@@ -336,7 +394,7 @@ async function pollSlow() {
       fetch("/plans").then(r => r.json()),
     ]);
     sessionsData = s; projectsData = p; plansData = pl;
-    renderSessions(); renderProjects(); renderPlans();
+    renderSessions(); renderProjects(); renderActive(); renderPlans();
   } catch (e) { /* server hiccup: hold last known data */ }
 }
 pollSlow();

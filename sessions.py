@@ -190,6 +190,82 @@ def _row(sid, project_folder, cwd, last_role, last_ts, mtime, live_rec):
     }
 
 
+def _transcript_path(session_id: str) -> Path | None:
+    """Finds a session's own .jsonl by walking PROJECTS_DIR and matching
+    the filename stem — never by building a path out of the id string
+    directly, so a crafted session id can't walk anywhere it shouldn't."""
+    if not PROJECTS_DIR.is_dir():
+        return None
+    for proj_dir in PROJECTS_DIR.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        candidate = proj_dir / f"{session_id}.jsonl"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _extract_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        t = block.get("type")
+        if t == "text":
+            parts.append(block.get("text", ""))
+        elif t == "tool_use":
+            parts.append(f"[tool call: {block.get('name', '?')}]")
+        elif t == "tool_result":
+            parts.append("[tool result]")
+    return "\n".join(p for p in parts if p)
+
+
+def recent_messages(session_id: str, limit: int = 20,
+                     tail_bytes: int = 200_000) -> list[dict]:
+    """The last `limit` user/assistant turns from a session's own
+    transcript, oldest first. Reads only the tail of the file, same
+    trade as _tail_activity: a line split by the seek point is a
+    parse failure that gets skipped, not a reason to read the whole
+    file. Best-effort throughout -- a missing or unreadable file
+    returns an empty list rather than raising."""
+    path = _transcript_path(session_id)
+    if path is None:
+        return []
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            if size > tail_bytes:
+                f.seek(-tail_bytes, os.SEEK_END)
+            chunk = f.read()
+    except OSError:
+        return []
+    out = []
+    for line in chunk.decode("utf-8", "ignore").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        msg = obj.get("message")
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        text = _extract_text(msg.get("content"))
+        if not text:
+            continue
+        out.append({"role": role, "text": text,
+                     "ts": obj.get("timestamp", "")})
+    return out[-limit:]
+
+
 def list_projects() -> list[dict]:
     """The same session rows, rolled up by project folder — no separate
     data source, just a different grouping of list_sessions()."""

@@ -89,6 +89,16 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     font-size:12px;color:var(--dim);padding:3px 0}
   .active-card .row .v{color:var(--ink)}
   #active-empty{color:var(--dimmer)}
+  .transcript{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);
+    max-height:320px;overflow-y:auto}
+  .transcript .msg{padding:6px 0;border-bottom:1px solid var(--line);
+    font-size:12px;line-height:1.5}
+  .transcript .msg .who{color:var(--dimmer);letter-spacing:.1em;
+    font-size:10px;text-transform:uppercase;margin-bottom:3px}
+  .transcript .msg.user .who{color:var(--gold)}
+  .transcript .msg.assistant .who{color:var(--green)}
+  .transcript .msg .text{white-space:pre-wrap;color:var(--ink)}
+  .transcript .empty{color:var(--dimmer);font-size:12px}
 
   /* Specs */
   #plans-list{list-style:none}
@@ -321,6 +331,25 @@ function renderProjects() {
   </tr>`).join("") || "<tr><td colspan=4>no projects found</td></tr>";
 }
 
+let transcripts = {};   // session_id -> [{role, text, ts}], oldest first
+
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+}
+
+function renderTranscript(sessionId) {
+  const msgs = transcripts[sessionId];
+  if (!msgs) return '<div class="transcript"><div class="empty">loading…</div></div>';
+  if (!msgs.length) return '<div class="transcript"><div class="empty">' +
+    'no readable turns yet</div></div>';
+  return '<div class="transcript">' + msgs.map(m => `
+    <div class="msg ${m.role}">
+      <div class="who">${m.role}</div>
+      <div class="text">${esc(m.text).slice(0, 1200)}</div>
+    </div>
+  `).join("") + '</div>';
+}
+
 function renderActive() {
   const live = sessionsData.filter(s => s.live);
   $("active-count").textContent = live.length ? ` (${live.length})` : "";
@@ -338,8 +367,18 @@ function renderActive() {
       <div class="row"><span>working directory</span><span class="v" title="${(s.cwd || "").replace(/"/g, "&quot;")}">${s.cwd || "—"}</span></div>
       <div class="row"><span>running for</span><span class="v">${durationText(s.started_at)}</span></div>
       <div class="row"><span>last update</span><span class="v">${agoText(s.mtime)}</span></div>
+      ${renderTranscript(s.session_id)}
     </div>
   `).join("");
+}
+
+async function pollTranscripts(liveSessions) {
+  await Promise.all(liveSessions.map(async s => {
+    try {
+      const r = await fetch("/transcript?session=" + encodeURIComponent(s.session_id));
+      transcripts[s.session_id] = await r.json();
+    } catch (e) { /* keep whatever we had */ }
+  }));
 }
 
 /* ---------------- Specs (plans) ---------------- */
@@ -395,6 +434,14 @@ async function pollSlow() {
     ]);
     sessionsData = s; projectsData = p; plansData = pl;
     renderSessions(); renderProjects(); renderActive(); renderPlans();
+    // Cards paint first with whatever transcript is already cached
+    // ("loading…" on the first pass) rather than waiting on a second
+    // round trip per live session before anything shows at all.
+    const live = sessionsData.filter(x => x.live);
+    if (live.length) {
+      await pollTranscripts(live);
+      renderActive();
+    }
   } catch (e) { /* server hiccup: hold last known data */ }
 }
 pollSlow();

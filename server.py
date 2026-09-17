@@ -43,6 +43,12 @@ Serves the face gallery at http://127.0.0.1:8790/ and exposes:
            filename (no slash, no backslash, no ".."), so this can
            never read outside the plans folder no matter what is
            passed.
+  /transcript?session=<id>  the last 20 user/assistant turns of one
+           session, oldest first. <id> is only ever used to match a
+           filename ai-visualizer already discovered by walking
+           PROJECTS_DIR itself (see sessions.py's _transcript_path) --
+           never concatenated into a path, so this can't be pointed
+           outside that folder either.
 
 READ-ONLY on the signal bus. The bus is tiny files written by a voice
 line (backtalk writes them natively, github.com/jaredrhod/backtalk):
@@ -281,6 +287,13 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/plans":
                 self._send(json.dumps(list_plans()).encode(),
                            "application/json")
+            elif path == "/transcript":
+                qs = urllib.parse.parse_qs(
+                    urllib.parse.urlsplit(self.path).query)
+                sid = (qs.get("session") or [""])[0]
+                self._send(json.dumps(
+                    claude_sessions.recent_messages(sid) if sid else []
+                ).encode(), "application/json")
             elif path == "/plan":
                 qs = urllib.parse.parse_qs(
                     urllib.parse.urlsplit(self.path).query)

@@ -351,7 +351,13 @@ function renderTranscript(sessionId) {
 }
 
 function renderActive() {
-  const live = sessionsData.filter(s => s.live);
+  // Filtering to live sessions inherits /sessions' overall mtime order,
+  // which is correct today because only live rows are shown -- but that
+  // silently breaks the moment two sessions are live at once and one's
+  // jsonl hasn't been written to in a while. Sort explicitly so "most
+  // current on top" is a guarantee, not an accident of upstream order.
+  const live = sessionsData.filter(s => s.live)
+    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
   $("active-count").textContent = live.length ? ` (${live.length})` : "";
   const list = $("active-list");
   if (!live.length) {
@@ -433,16 +439,25 @@ async function pollSlow() {
       fetch("/plans").then(r => r.json()),
     ]);
     sessionsData = s; projectsData = p; plansData = pl;
-    renderSessions(); renderProjects(); renderActive(); renderPlans();
+    // Each render wrapped on its own: one bad row anywhere must not be
+    // able to silently stop the rest from ever running again, which is
+    // exactly the failure mode a shared try/catch around all four would
+    // have -- and the console line means a future silent break shows up
+    // instead of just looking like "the tab stopped updating."
+    for (const [name, fn] of [["sessions", renderSessions],
+        ["projects", renderProjects], ["active", renderActive],
+        ["plans", renderPlans]]) {
+      try { fn(); } catch (e) { console.error("render " + name + " failed", e); }
+    }
     // Cards paint first with whatever transcript is already cached
     // ("loading…" on the first pass) rather than waiting on a second
     // round trip per live session before anything shows at all.
     const live = sessionsData.filter(x => x.live);
     if (live.length) {
       await pollTranscripts(live);
-      renderActive();
+      try { renderActive(); } catch (e) { console.error("render active (post-transcript) failed", e); }
     }
-  } catch (e) { /* server hiccup: hold last known data */ }
+  } catch (e) { console.error("pollSlow failed", e); }
 }
 pollSlow();
 setInterval(pollSlow, 4000);

@@ -78,6 +78,9 @@ Ctrl-C stops.
 import json
 import math
 import mimetypes
+import os
+import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -132,6 +135,16 @@ PORT = int(CFG.get("port", 8790))
 if "--port" in sys.argv:
     i = sys.argv.index("--port")
     PORT = int(sys.argv[i + 1])
+
+# BIND_HOST, added 2026-09-17 for phone access. Was 127.0.0.1 (loopback only);
+# now every interface, so a phone on Marcus's Tailscale tailnet can load the
+# dashboard directly. What keeps this private is NOT anything in this file -
+# there is no token or Origin check here, unlike athena_desk.py - it is the
+# Windows Firewall rule Set-AthenaRemoteAccess.ps1 scopes to 100.64.0.0/10,
+# Tailscale's own range. Marcus accepted that trust level explicitly rather
+# than asking for a token: only his own two phones and this PC are ever on
+# that tailnet, the same guarantee Remote Desktop already relies on.
+BIND_HOST = "0.0.0.0"
 
 
 def list_faces():
@@ -365,6 +378,34 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def _tailscale_ips() -> list[str]:
+    """This machine's Tailscale v4 addresses, or [] if absent/not signed in.
+    Same lookup shape as athena_desk.py's copy: PATH first, then where the
+    installer actually puts it, since a shell opened before Tailscale was
+    installed carries a stale PATH for its whole life."""
+    exe = shutil.which("tailscale")
+    if not exe:
+        for candidate in (
+            Path(os.environ.get("ProgramFiles", "")) / "Tailscale" / "tailscale.exe",
+            Path(os.environ.get("ProgramFiles(x86)", "")) / "Tailscale" / "tailscale.exe",
+        ):
+            if candidate.exists():
+                exe = str(candidate)
+                break
+    if not exe:
+        return []
+    try:
+        result = subprocess.run(
+            [exe, "ip", "-4"], capture_output=True, text=True, timeout=3,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
 if __name__ == "__main__":
     mode = f"MOCK={MOCK}" if MOCK else f"bus: {BUS}"
     root = f"http://127.0.0.1:{PORT}/"
@@ -378,7 +419,7 @@ if __name__ == "__main__":
     # window closed. The end-user symptom was "I can hear my agent but the
     # face never shows up", with the face running perfectly the entire time.
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+        srv = ThreadingHTTPServer((BIND_HOST, PORT), Handler)
     except OSError as e:
         if e.errno not in (errno.EADDRINUSE, errno.EACCES):
             raise
@@ -403,6 +444,9 @@ if __name__ == "__main__":
         sys.exit(1)
     srv.allow_reuse_address = True
     print(f"ai-visualizer on {root}  opening {url}  ({mode})  Ctrl-C stops", flush=True)
+    for ip in _tailscale_ips():
+        print(f"  also reachable at http://{ip}:{PORT}/  (phone, over Tailscale only)",
+              flush=True)
     if not NO_OPEN:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:

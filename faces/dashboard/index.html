@@ -348,7 +348,11 @@ function renderTranscript(sessionId) {
   // forcing a fresh scroll to the bottom to find the current one each
   // time. Newest-on-top puts what just happened where the reset already
   // lands, no scrolling required to see it.
-  return '<div class="transcript">' + msgs.slice().reverse().map(m => `
+  // data-session tags this element so renderActive() can find it again
+  // after the rebuild below and put the scroll position back -- see the
+  // save/restore there. Without the tag there is no way to match the old
+  // node to its replacement.
+  return `<div class="transcript" data-session="${sessionId}">` + msgs.slice().reverse().map(m => `
     <div class="msg ${m.role}">
       <div class="who">${m.role}</div>
       <div class="text">${esc(m.text)}</div>
@@ -371,6 +375,16 @@ function renderActive() {
       'running right now</div>';
     return;
   }
+  // The whole list is rebuilt wholesale below (innerHTML, not a diff), so
+  // every .transcript pane is a brand-new element every 4s poll -- a
+  // fresh element starts at scrollTop 0 regardless of where the old one
+  // was, which is why scrolling down to read anything kept snapping back
+  // to the top. Save each pane's position by session id before the
+  // rebuild, put it back on the new element after.
+  const scrollPos = {};
+  list.querySelectorAll(".transcript[data-session]").forEach(el => {
+    scrollPos[el.dataset.session] = el.scrollTop;
+  });
   list.innerHTML = live.map(s => `
     <div class="active-card">
       <div class="name">${s.name || s.session_id.slice(0, 8)}</div>
@@ -382,6 +396,10 @@ function renderActive() {
       ${renderTranscript(s.session_id)}
     </div>
   `).join("");
+  list.querySelectorAll(".transcript[data-session]").forEach(el => {
+    const pos = scrollPos[el.dataset.session];
+    if (pos) el.scrollTop = pos;
+  });
 }
 
 async function pollTranscripts(liveSessions) {

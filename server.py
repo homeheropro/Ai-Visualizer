@@ -39,6 +39,10 @@ Serves the face gallery at http://127.0.0.1:8790/ and exposes:
   /plans   Plan Mode's own output at ~/.claude/plans, newest first. A
            viewer, not an approval tracker — see list_plans()'s
            docstring for what it can't tell you.
+  /plan?file=<name>  one plan's raw text. <name> must be a bare
+           filename (no slash, no backslash, no ".."), so this can
+           never read outside the plans folder no matter what is
+           passed.
 
 READ-ONLY on the signal bus. The bus is tiny files written by a voice
 line (backtalk writes them natively, github.com/jaredrhod/backtalk):
@@ -73,6 +77,7 @@ import threading
 import time
 import webbrowser
 import urllib.request
+import urllib.parse
 import errno
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -276,6 +281,28 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/plans":
                 self._send(json.dumps(list_plans()).encode(),
                            "application/json")
+            elif path == "/plan":
+                qs = urllib.parse.parse_qs(
+                    urllib.parse.urlsplit(self.path).query)
+                name = (qs.get("file") or [""])[0]
+                # Bare filename only -- no separators, so this can never
+                # walk outside PLANS_DIR regardless of what's passed.
+                if not name or "/" in name or "\\" in name or name in (
+                        ".", ".."):
+                    self._send(b'{"error":"bad file"}',
+                               "application/json", 400)
+                else:
+                    target = PLANS_DIR / name
+                    if target.is_file():
+                        self._send(json.dumps(
+                            {"file": name,
+                             "text": target.read_text(
+                                 encoding="utf-8",
+                                 errors="ignore")}).encode(),
+                            "application/json")
+                    else:
+                        self._send(b'{"error":"not found"}',
+                                   "application/json", 404)
             else:
                 self._static(path)
         except ConnectionError:

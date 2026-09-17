@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<!--
+ai-visualizer: give your AI agent a face.
+Copyright (C) 2026 Jared Rhodenizer
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard</title>
+<style>
+  :root{
+    --ink:#e8f0f2; --dim:#8a9aa2; --dimmer:#4a5a62; --bg:#0a1210; --panel:#0f1a17;
+    --line:#1c2f26; --gold:#e7c368; --green:#3ddc84; --red:#ff4d5e;
+    --mono:"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;min-height:100%;background:var(--bg);color:var(--ink);
+    font-family:var(--mono);font-size:14px}
+  body{padding:22px 26px 60px}
+
+  header{display:flex;align-items:baseline;justify-content:space-between;
+    border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:20px}
+  header .t{font-size:20px;letter-spacing:.18em}
+  header .state{font-size:12px;letter-spacing:.22em;color:var(--dim)}
+  header .state.speaking,header .state.listening{color:var(--green)}
+  header .state.thinking{color:var(--gold)}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:900px){.grid{grid-template-columns:1fr}}
+
+  .tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+    padding:16px 18px;display:flex;flex-direction:column;min-height:0}
+  .tile h2{font-size:12px;letter-spacing:.24em;color:var(--dim);
+    text-transform:uppercase;margin-bottom:10px;display:flex;
+    justify-content:space-between;align-items:center}
+  .tile h2 .tabs button{background:none;border:1px solid var(--dimmer);
+    color:var(--dim);font-family:var(--mono);font-size:11px;letter-spacing:.1em;
+    padding:2px 8px;border-radius:3px;cursor:pointer;margin-left:6px}
+  .tile h2 .tabs button.on{color:var(--ink);border-color:var(--gold)}
+  .note{font-size:11px;color:var(--dimmer);margin-top:8px;line-height:1.5}
+
+  /* Runs */
+  #runs-log{list-style:none;max-height:280px;overflow-y:auto;font-size:13px}
+  #runs-log li{padding:5px 0;border-bottom:1px solid var(--line);
+    display:flex;gap:10px}
+  #runs-log li .ts{color:var(--dimmer);flex:0 0 auto;font-size:11px;
+    padding-top:2px}
+  #runs-log .empty{color:var(--dimmer)}
+  #runs-now{font-size:13px;color:var(--green);min-height:1.4em;margin-bottom:6px}
+  #runs-now.idle{color:var(--dimmer)}
+
+  /* Sessions / Projects */
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;color:var(--dimmer);font-weight:normal;
+    padding:4px 6px;border-bottom:1px solid var(--line)}
+  td{padding:5px 6px;border-bottom:1px solid var(--line);
+    max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .badge{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;
+    letter-spacing:.06em}
+  .badge.live{background:rgba(61,220,132,.15);color:var(--green);
+    border:1px solid rgba(61,220,132,.4)}
+  .badge.done{background:rgba(138,154,162,.1);color:var(--dim);
+    border:1px solid var(--dimmer)}
+  .scroll{max-height:280px;overflow-y:auto}
+
+  /* Specs */
+  #plans-list{list-style:none}
+  #plans-list li{padding:6px 0;border-bottom:1px solid var(--line);
+    cursor:pointer}
+  #plans-list li:hover{color:var(--gold)}
+  #plans-list .when{color:var(--dimmer);font-size:11px;margin-left:8px}
+  #plan-view{display:none;margin-top:10px;padding-top:10px;
+    border-top:1px solid var(--line);white-space:pre-wrap;font-size:12px;
+    max-height:320px;overflow-y:auto;color:var(--dim)}
+  #plan-view.open{display:block}
+  #plan-view .close{float:right;cursor:pointer;color:var(--gold)}
+
+  /* Usage */
+  .usage-row{display:flex;justify-content:space-between;padding:5px 0;
+    border-bottom:1px solid var(--line);font-size:13px}
+  .usage-row .n{color:var(--green)}
+  .usage-row .n.hot{color:var(--red)}
+  #session-usage{margin-top:10px;font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="t" id="title">DASHBOARD</div>
+  <div class="state" id="state">idle</div>
+</header>
+
+<div class="grid">
+
+  <div class="tile">
+    <h2>Runs</h2>
+    <div id="runs-now" class="idle">idle</div>
+    <ul id="runs-log"><li class="empty">nothing run yet this page load</li></ul>
+    <div class="note">What the agent is doing right now, and a short
+      history since this page opened. Nothing before that is kept —
+      this reads the live signal bus, not a log file.</div>
+  </div>
+
+  <div class="tile">
+    <h2>Usage</h2>
+    <div id="rate-limits"><div class="note">Waiting on data — only
+      appears once show_usage is on and a turn has completed.</div></div>
+    <div id="session-usage"></div>
+    <div class="note">The five-hour/weekly figures are the account's
+      real plan usage, pulled through the Agent SDK. This-session turns/
+      tokens/cost are the same numbers "usage report" speaks aloud.</div>
+  </div>
+
+  <div class="tile">
+    <h2>Sessions &amp; Projects
+      <span class="tabs">
+        <button id="tab-sessions" class="on">Sessions</button
+        ><button id="tab-projects">Projects</button>
+      </span>
+    </h2>
+    <div class="scroll">
+      <table id="sessions-table"><thead><tr>
+        <th>Live</th><th>Project</th><th>Status / last</th><th>Updated</th>
+      </tr></thead><tbody></tbody></table>
+      <table id="projects-table" style="display:none"><thead><tr>
+        <th>Project</th><th>Sessions</th><th>Live</th><th>Updated</th>
+      </tr></thead><tbody></tbody></table>
+    </div>
+    <div class="note">"Live" means a Claude Code process is actually
+      running that session right now. It does NOT reliably mean it is
+      waiting on you specifically — only "busy" has been confirmed as
+      an observed status value so far; other states aren't verified yet.</div>
+  </div>
+
+  <div class="tile">
+    <h2>Specs</h2>
+    <ul id="plans-list"><li class="empty" style="color:var(--dimmer)">
+      no plans on disk yet</li></ul>
+    <div id="plan-view"><span class="close" id="plan-close">close</span>
+      <div id="plan-text"></div></div>
+    <div class="note">Plan Mode's own output, not a separate approval
+      system. This shows what was planned, not whether it was approved,
+      rejected, or abandoned — that isn't recorded anywhere this can
+      read.</div>
+  </div>
+
+</div>
+
+<script src="../../core.js"></script>
+<script>
+"use strict";
+
+AV.init({});
+AV.ready(a => { document.title = a.label + " — Dashboard"; });
+
+const $ = id => document.getElementById(id);
+
+/* ---------------- Runs: live activity + a page-local history ---------------- */
+let lastActivity = null;
+const runsHistory = [];   // {ts, text} — newest first, capped
+const RUNS_CAP = 60;
+
+function fmtClock(d) {
+  return d.toTimeString().slice(0, 8);
+}
+
+function renderRuns() {
+  const now = $("runs-now");
+  if (AV.activity) {
+    now.textContent = AV.activity;
+    now.classList.remove("idle");
+  } else {
+    now.textContent = "idle";
+    now.classList.add("idle");
+  }
+  const log = $("runs-log");
+  if (!runsHistory.length) {
+    log.innerHTML = '<li class="empty">nothing run yet this page load</li>';
+    return;
+  }
+  log.innerHTML = runsHistory.map(r =>
+    `<li><span class="ts">${fmtClock(r.ts)}</span><span>${r.text}</span></li>`
+  ).join("");
+}
+
+function trackActivity() {
+  const cur = AV.activity || "";
+  if (cur !== lastActivity) {
+    if (cur) {
+      runsHistory.unshift({ ts: new Date(), text: cur });
+      if (runsHistory.length > RUNS_CAP) runsHistory.length = RUNS_CAP;
+    }
+    lastActivity = cur;
+  }
+}
+
+/* ---------------- Usage ---------------- */
+function renderUsage() {
+  const rows = AV.util.usageRows();
+  $("rate-limits").innerHTML = rows.length
+    ? rows.map(r =>
+        `<div class="usage-row"><span>${r.label}</span>` +
+        `<span class="n${r.hot ? " hot" : ""}">${r.text}</span></div>`
+      ).join("")
+    : '<div class="note">Waiting on data — only appears once ' +
+      'show_usage is on and a turn has completed.</div>';
+
+  const row = AV.util.sessionUsageRow();
+  $("session-usage").textContent = row
+    ? "This session: " + row.text
+    : "This session: waiting on the first completed turn.";
+}
+
+/* ---------------- State header ---------------- */
+function renderState() {
+  const el = $("state");
+  el.textContent = AV.state;
+  el.className = "state " + AV.state;
+}
+
+/* ---------------- Sessions & Projects ---------------- */
+let sessionsData = [], projectsData = [];
+
+function agoText(epochSeconds) {
+  const d = Date.now() / 1000 - epochSeconds;
+  if (!(d >= 0)) return "";
+  if (d < 60) return "just now";
+  if (d < 3600) return Math.round(d / 60) + "m ago";
+  if (d < 86400) return Math.round(d / 3600) + "h ago";
+  return Math.round(d / 86400) + "d ago";
+}
+
+function shortCwd(cwd) {
+  if (!cwd) return "—";
+  const parts = cwd.replace(/\\/g, "/").split("/");
+  return parts.slice(-2).join("/");
+}
+
+function renderSessions() {
+  const tbody = document.querySelector("#sessions-table tbody");
+  tbody.innerHTML = sessionsData.slice(0, 40).map(s => `<tr>
+    <td><span class="badge ${s.live ? "live" : "done"}">${s.live ? "live" : "done"}</span></td>
+    <td title="${(s.cwd || "").replace(/"/g, "&quot;")}">${shortCwd(s.cwd)}</td>
+    <td>${s.live ? (s.status || "?") : (s.last_role || "—")}</td>
+    <td>${agoText(s.mtime)}</td>
+  </tr>`).join("") || "<tr><td colspan=4>no sessions found</td></tr>";
+}
+
+function renderProjects() {
+  const tbody = document.querySelector("#projects-table tbody");
+  tbody.innerHTML = projectsData.map(p => `<tr>
+    <td title="${(p.cwd || "").replace(/"/g, "&quot;")}">${shortCwd(p.cwd)}</td>
+    <td>${p.session_count}</td>
+    <td>${p.live_count || "—"}</td>
+    <td>${agoText(p.last_mtime)}</td>
+  </tr>`).join("") || "<tr><td colspan=4>no projects found</td></tr>";
+}
+
+$("tab-sessions").onclick = () => {
+  $("tab-sessions").classList.add("on");
+  $("tab-projects").classList.remove("on");
+  $("sessions-table").style.display = "";
+  $("projects-table").style.display = "none";
+};
+$("tab-projects").onclick = () => {
+  $("tab-projects").classList.add("on");
+  $("tab-sessions").classList.remove("on");
+  $("projects-table").style.display = "";
+  $("sessions-table").style.display = "none";
+};
+
+/* ---------------- Specs (plans) ---------------- */
+let plansData = [];
+
+function renderPlans() {
+  const list = $("plans-list");
+  list.innerHTML = plansData.length
+    ? plansData.map(p =>
+        `<li data-file="${p.file}">${p.title}` +
+        `<span class="when">${agoText(p.mtime)}</span></li>`
+      ).join("")
+    : '<li class="empty" style="color:var(--dimmer)">no plans on disk yet</li>';
+  list.querySelectorAll("li[data-file]").forEach(li => {
+    li.onclick = () => openPlan(li.dataset.file);
+  });
+}
+
+async function openPlan(file) {
+  try {
+    const r = await fetch("/plan?file=" + encodeURIComponent(file));
+    const data = await r.json();
+    $("plan-text").textContent = data.text || data.error || "";
+    $("plan-view").classList.add("open");
+  } catch (e) {
+    $("plan-text").textContent = "Could not load that plan.";
+    $("plan-view").classList.add("open");
+  }
+}
+$("plan-close").onclick = () => $("plan-view").classList.remove("open");
+
+/* ---------------- Polling ---------------- */
+// The voice bus (state/activity/usage) moves fast and core.js already
+// polls it at 120ms; this page just needs to read AV's fields on its
+// own slower clock, since nothing here is animated. Sessions/projects/
+// plans are a SEPARATE, much slower poll — that data changes by the
+// minute, not by the moment, and reading Claude Code's on-disk logs is
+// not free, so hammering it at the voice-bus rate would be wasted work.
+setInterval(() => {
+  AV.tick(200);
+  trackActivity();
+  renderRuns();
+  renderUsage();
+  renderState();
+}, 200);
+
+async function pollSlow() {
+  try {
+    const [s, p, pl] = await Promise.all([
+      fetch("/sessions").then(r => r.json()),
+      fetch("/projects").then(r => r.json()),
+      fetch("/plans").then(r => r.json()),
+    ]);
+    sessionsData = s; projectsData = p; plansData = pl;
+    renderSessions(); renderProjects(); renderPlans();
+  } catch (e) { /* server hiccup: hold last known data */ }
+}
+pollSlow();
+setInterval(pollSlow, 4000);
+</script>
+</body>
+</html>

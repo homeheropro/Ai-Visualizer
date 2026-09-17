@@ -342,7 +342,13 @@ function renderTranscript(sessionId) {
   if (!msgs) return '<div class="transcript"><div class="empty">loading…</div></div>';
   if (!msgs.length) return '<div class="transcript"><div class="empty">' +
     'no readable turns yet</div></div>';
-  return '<div class="transcript">' + msgs.map(m => `
+  // /transcript returns oldest first, but every poll rebuilds this div's
+  // innerHTML wholesale, which resets its scroll position to the top --
+  // so oldest-on-top meant every 4s poll snapped back to old messages,
+  // forcing a fresh scroll to the bottom to find the current one each
+  // time. Newest-on-top puts what just happened where the reset already
+  // lands, no scrolling required to see it.
+  return '<div class="transcript">' + msgs.slice().reverse().map(m => `
     <div class="msg ${m.role}">
       <div class="who">${m.role}</div>
       <div class="text">${esc(m.text).slice(0, 1200)}</div>

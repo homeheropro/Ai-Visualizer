@@ -130,6 +130,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 <nav class="tabbar" id="tabbar">
   <button class="tabbtn on" data-tab="active">Active<span id="active-count"></span></button>
   <button class="tabbtn" data-tab="talk">Talk</button>
+  <button class="tabbtn" data-tab="send">Send</button>
   <button class="tabbtn" data-tab="runs">Runs</button>
   <button class="tabbtn" data-tab="usage">Usage</button>
   <button class="tabbtn" data-tab="sessions">Sessions</button>
@@ -159,6 +160,34 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     its own page. It is a separate Claude Code session from this
     dashboard's own voice and terminal sessions; nothing here reads
     its conversation, and nothing there reads this dashboard's.</div>
+</div>
+
+<div class="panel" data-panel="send">
+  <h2>Send to This Session</h2>
+  <div class="note" style="margin-bottom:14px">Unlike Talk, this goes
+    straight into the live conversation on the Active tab -- the one
+    running at the desk right now, whether that's a voice session or a
+    terminal. Desk only: backtalk only listens for this on this
+    machine's own loopback address, on purpose, so it can't be reached
+    over Tailscale.</div>
+  <textarea id="send-text" rows="4" placeholder="Type a URL or a message to hand into the live session…"
+    style="width:100%;resize:vertical;background:rgba(0,0,0,.28);color:var(--ink);
+    border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+    font:14px/1.5 inherit;box-sizing:border-box"></textarea>
+  <div style="display:flex;gap:10px;margin-top:10px;align-items:center">
+    <button id="send-btn" class="tabbtn" style="cursor:pointer">Send</button>
+    <span id="send-status" class="note" style="margin:0"></span>
+  </div>
+  <div id="drop-zone" style="margin-top:18px;border:2px dashed var(--dimmer);
+    border-radius:10px;padding:28px;text-align:center;color:var(--dim);
+    font-size:13px">
+    Drag a file here to attach it to the live session
+  </div>
+  <input type="file" id="file-picker" class="hide" style="display:none">
+  <div class="note" style="margin-top:10px">A dropped file is saved to
+    <code>backtalk/inbox/</code> and handed to the session as a path --
+    Athena reads it with her own tools from there, same as anything
+    else in this vault or workspace.</div>
 </div>
 
 <div class="panel" data-panel="runs">
@@ -224,6 +253,82 @@ AV.init({});
 AV.ready(a => { document.title = a.label + " — Dashboard"; });
 
 const $ = id => document.getElementById(id);
+
+/* ---------------- Send: straight into the live session, not a new one ----
+   Talks to backtalk's own inbox server (inbox.py), loopback-only by design
+   -- so this is always 127.0.0.1, never location.hostname. Loaded from the
+   phone over Tailscale, 127.0.0.1 means the PHONE's own loopback, which is
+   nothing, so this fails to connect there instead of silently doing the
+   wrong thing -- that failure IS the desk-only boundary working. */
+const INBOX = "http://127.0.0.1:8766";
+
+function sendStatus(msg, isError) {
+  const el = $("send-status");
+  el.textContent = msg;
+  el.style.color = isError ? "#ff7b7b" : "var(--dim)";
+}
+
+async function sendInboxText() {
+  const ta = $("send-text");
+  const text = ta.value.trim();
+  if (!text) return;
+  sendStatus("sending…");
+  try {
+    const r = await fetch(INBOX + "/inject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    ta.value = "";
+    sendStatus("sent — check the Active tab");
+  } catch (e) {
+    sendStatus("couldn't reach backtalk — this only works from the " +
+      "desk itself, not over Tailscale", true);
+  }
+}
+$("send-btn").onclick = sendInboxText;
+$("send-text").addEventListener("keydown", e => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendInboxText();
+});
+
+async function sendInboxFile(file) {
+  sendStatus(`sending ${file.name}…`);
+  try {
+    const r = await fetch(INBOX + "/attach", {
+      method: "POST",
+      headers: { "X-Filename": encodeURIComponent(file.name) },
+      body: file,
+    });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    sendStatus(file.name + " attached — check the Active tab");
+  } catch (e) {
+    sendStatus("couldn't reach backtalk — this only works from the " +
+      "desk itself, not over Tailscale", true);
+  }
+}
+
+const dropZone = $("drop-zone");
+dropZone.onclick = () => $("file-picker").click();
+$("file-picker").onchange = e => {
+  if (e.target.files[0]) sendInboxFile(e.target.files[0]);
+  e.target.value = "";
+};
+["dragover", "dragenter"].forEach(evt =>
+  dropZone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropZone.style.borderColor = "var(--gold)";
+  }));
+["dragleave", "dragend"].forEach(evt =>
+  dropZone.addEventListener(evt, () => {
+    dropZone.style.borderColor = "var(--dimmer)";
+  }));
+dropZone.addEventListener("drop", e => {
+  e.preventDefault();
+  dropZone.style.borderColor = "var(--dimmer)";
+  const file = e.dataTransfer.files[0];
+  if (file) sendInboxFile(file);
+});
 
 /* ---------------- Tabs: one panel open at a time ---------------- */
 document.querySelectorAll(".tabbtn").forEach(btn => {

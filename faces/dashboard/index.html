@@ -129,6 +129,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 <nav class="tabbar" id="tabbar">
   <button class="tabbtn on" data-tab="active">Active<span id="active-count"></span></button>
+  <button class="tabbtn" data-tab="talk">Talk</button>
   <button class="tabbtn" data-tab="runs">Runs</button>
   <button class="tabbtn" data-tab="usage">Usage</button>
   <button class="tabbtn" data-tab="sessions">Sessions</button>
@@ -145,6 +146,19 @@ SPDX-License-Identifier: AGPL-3.0-or-later
     and a voice session both count if both are open. This does not mean
     it is waiting on you; only that it exists and is running. "Kind" and
     "entrypoint" are read straight off that file, not interpreted.</div>
+</div>
+
+<div class="panel" data-panel="talk">
+  <h2>Talk to Athena</h2>
+  <iframe id="talk-frame" title="Athena desk"
+    style="width:100%;height:75vh;border:1px solid var(--line);
+    border-radius:8px;background:#020306"></iframe>
+  <div class="note">This is athena_desk.py's own interface, embedded
+    rather than rebuilt -- typing, file attachment, model and mode
+    switches, new session and restart all work exactly as they do on
+    its own page. It is a separate Claude Code session from this
+    dashboard's own voice and terminal sessions; nothing here reads
+    its conversation, and nothing there reads this dashboard's.</div>
 </div>
 
 <div class="panel" data-panel="runs">
@@ -218,6 +232,16 @@ document.querySelectorAll(".tabbtn").forEach(btn => {
     document.querySelectorAll(".panel").forEach(p => p.classList.remove("on"));
     btn.classList.add("on");
     document.querySelector(`.panel[data-panel="${btn.dataset.tab}"]`).classList.add("on");
+    // athena_desk.py runs on its own port (8765), so the address has to
+    // be built from whatever host this dashboard was actually loaded
+    // from -- a hardcoded 127.0.0.1 would point a phone back at itself
+    // instead of this machine. Loaded once, on first visit to the tab,
+    // not at page load, so opening the dashboard never silently opens a
+    // second Claude Code session nobody asked for.
+    if (btn.dataset.tab === "talk") {
+      const frame = $("talk-frame");
+      if (!frame.src) frame.src = `http://${location.hostname}:8765/`;
+    }
   };
 });
 

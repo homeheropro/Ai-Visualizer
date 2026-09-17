@@ -224,14 +224,38 @@ def _extract_text(content) -> str:
     return "\n".join(p for p in parts if p)
 
 
+def _extract_prose(content) -> str:
+    """Same walk as _extract_text, but for the Active tab's transcript
+    specifically: tool_use and tool_result blocks are dropped rather
+    than rendered as placeholder lines. A turn that is only a tool call
+    or only a tool result carries no actual dialogue, and keeping those
+    lines was what made the Active tab converge with the Runs tab --
+    both ended up reading as a tool-activity log instead of two
+    different things. Real assistant prose that happens to sit beside a
+    tool call in the same message is kept; only the placeholder is cut."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = [b.get("text", "") for b in content
+             if isinstance(b, dict) and b.get("type") == "text"]
+    return "\n".join(p for p in parts if p)
+
+
 def recent_messages(session_id: str, limit: int = 20,
-                     tail_bytes: int = 200_000) -> list[dict]:
+                     tail_bytes: int = 400_000) -> list[dict]:
     """The last `limit` user/assistant turns from a session's own
-    transcript, oldest first. Reads only the tail of the file, same
-    trade as _tail_activity: a line split by the seek point is a
-    parse failure that gets skipped, not a reason to read the whole
-    file. Best-effort throughout -- a missing or unreadable file
-    returns an empty list rather than raising."""
+    transcript that carry actual dialogue, oldest first -- a tool-only
+    turn (pure tool_use or pure tool_result, no text block) is skipped
+    entirely rather than shown as a placeholder line, because that
+    placeholder stream is what the Runs tab already is. Reads only the
+    tail of the file, same trade as _tail_activity: a line split by the
+    seek point is a parse failure that gets skipped, not a reason to
+    read the whole file. tail_bytes is larger than _tail_activity's,
+    since a busy tool-heavy stretch now yields far fewer kept lines per
+    byte read than before this filter existed. Best-effort throughout --
+    a missing or unreadable file returns an empty list rather than
+    raising."""
     path = _transcript_path(session_id)
     if path is None:
         return []
@@ -258,7 +282,7 @@ def recent_messages(session_id: str, limit: int = 20,
         role = msg.get("role")
         if role not in ("user", "assistant"):
             continue
-        text = _extract_text(msg.get("content"))
+        text = _extract_prose(msg.get("content"))
         if not text:
             continue
         out.append({"role": role, "text": text,

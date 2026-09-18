@@ -331,9 +331,14 @@ dropZone.addEventListener("drop", e => {
 });
 
 /* ---------------- Tabs: one panel open at a time ---------------- */
-document.querySelectorAll(".tabbtn").forEach(btn => {
+/* Scoped to #tabbar -- the Send button also carries class="tabbtn" for its
+   visual style only (it is not a tab), and used to get silently hijacked
+   by this same handler: clicking it cleared every panel, then threw
+   trying to open a panel for a tab that doesn't exist, before Send's own
+   click handler (set above) ever ran. */
+document.querySelectorAll("#tabbar .tabbtn").forEach(btn => {
   btn.onclick = () => {
-    document.querySelectorAll(".tabbtn").forEach(b => b.classList.remove("on"));
+    document.querySelectorAll("#tabbar .tabbtn").forEach(b => b.classList.remove("on"));
     document.querySelectorAll(".panel").forEach(p => p.classList.remove("on"));
     btn.classList.add("on");
     document.querySelector(`.panel[data-panel="${btn.dataset.tab}"]`).classList.add("on");
